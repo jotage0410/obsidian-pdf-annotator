@@ -81,11 +81,9 @@ export class AnnotationCanvas {
 
 	setTool(tool: 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight'): void {
 		this.activeTool = tool;
-		if (tool === 'pan' || tool === 'text-highlight') {
-			this.canvas.style.pointerEvents = 'none';
-		} else {
-			this.canvas.style.pointerEvents = 'auto';
-		}
+		// Use CSS classes instead of inline styles for pointer-events
+		this.canvas.classList.toggle('tool-pan', tool === 'pan');
+		this.canvas.classList.toggle('tool-text-highlight', tool === 'text-highlight');
 	}
 
 	setColor(color: string): void {

@@ -131,11 +131,7 @@ export class InputManager {
 	 * Apply appropriate touch-action CSS based on current state.
 	 */
 	applyTouchAction(canvas: HTMLCanvasElement, isDrawingMode: boolean): void {
-		if (isDrawingMode) {
-			canvas.style.touchAction = 'none';
-		} else {
-			canvas.style.touchAction = 'pan-x pan-y';
-		}
+		canvas.classList.toggle('drawing-active', isDrawingMode);
 	}
 
 	destroyHoverCursor(): void {

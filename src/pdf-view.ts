@@ -10,12 +10,10 @@ import { AnnotationStorage } from './storage';
 import { TextHighlighterTool } from './tools/text-highlighter';
 import type { Stroke, TextHighlight } from './types';
 import type { PDFAnnotatorSettings } from './settings';
-import styles from './styles.css';
 
 export class PDFAnnotatorView extends ItemView {
 	private renderer: PDFRenderer | null = null;
 	private file: TFile | null = null;
-	private styleEl: HTMLStyleElement | null = null;
 	private annotationCanvases: Map<number, AnnotationCanvas> = new Map();
 	private textHighlighters: Map<number, TextHighlighterTool> = new Map();
 	private inputManager: InputManager = new InputManager();
@@ -51,14 +49,7 @@ export class PDFAnnotatorView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		// Inject styles (only once globally)
-		if (!document.querySelector('style[data-pencil-styles]')) {
-			this.styleEl = document.createElement('style');
-			this.styleEl.setAttribute('data-pencil-styles', '');
-			this.styleEl.textContent = styles;
-			document.head.appendChild(this.styleEl);
-		}
-
+		// Styles are loaded automatically by Obsidian from styles.css
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('pdf-annotator-container');
@@ -364,9 +355,5 @@ export class PDFAnnotatorView extends ItemView {
 
 	async onClose(): Promise<void> {
 		await this.cleanup();
-		if (this.styleEl) {
-			this.styleEl.remove();
-			this.styleEl = null;
-		}
 	}
 }

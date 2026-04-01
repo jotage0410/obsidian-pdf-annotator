@@ -39,10 +39,15 @@
 	width: 100%;
 	height: 100%;
 	cursor: crosshair;
+	touch-action: pan-x pan-y;
 }
 
-.annotation-layer.pan-mode canvas {
-	cursor: grab;
+.annotation-layer canvas.drawing-active {
+	touch-action: none;
+}
+
+.annotation-layer canvas.tool-pan,
+.annotation-layer canvas.tool-text-highlight {
 	pointer-events: none;
 }
 
