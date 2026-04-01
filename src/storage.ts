@@ -37,7 +37,7 @@ export class AnnotationStorage {
 				this.data = parsed;
 			}
 		} catch (e) {
-			console.warn('PDF Annotator: Failed to load annotations, starting fresh', e);
+			console.warn('Pencil: Failed to load annotations, starting fresh', e);
 			// Backup corrupted file
 			try {
 				const exists = await this.app.vault.adapter.exists(this.annotationPath);
@@ -103,7 +103,7 @@ export class AnnotationStorage {
 				this.onSaved();
 			}
 		} catch (e) {
-			console.error('PDF Annotator: Failed to save annotations', e);
+			console.error('Pencil: Failed to save annotations', e);
 		}
 	}
 

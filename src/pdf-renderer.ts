@@ -24,8 +24,16 @@ export class PDFRenderer {
 	}
 
 	async loadPDF(data: ArrayBuffer): Promise<void> {
-		pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-		const loadingTask = pdfjsLib.getDocument({ data });
+		// Use fake worker (main thread) - avoids worker file configuration issues in Obsidian
+		if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+			pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+		}
+		const loadingTask = pdfjsLib.getDocument({
+			data,
+			useWorkerFetch: false,
+			isEvalSupported: false,
+			useSystemFonts: true,
+		});
 		this.pdfDoc = await loadingTask.promise;
 		await this.createPageContainers();
 		this.setupIntersectionObserver();

@@ -20,7 +20,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		this.addSettingTab(new PDFAnnotatorSettingTab(this.app, this));
 
 		// Add ribbon icon to open PDF
-		this.addRibbonIcon('pencil', 'PDF Annotator', () => {
+		this.addRibbonIcon('pencil', 'Pencil - Open PDF', () => {
 			const pdfFiles = this.app.vault.getFiles().filter(f => f.extension === 'pdf');
 			if (pdfFiles.length > 0) {
 				this.openPDF(pdfFiles[0]);
@@ -29,8 +29,8 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		// Command to open PDF in annotator
 		this.addCommand({
-			id: 'open-pdf-annotator',
-			name: 'Open current PDF in annotator',
+			id: 'open-pdf-pencil',
+			name: 'Open current PDF in Pencil',
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (file?.extension === 'pdf') {

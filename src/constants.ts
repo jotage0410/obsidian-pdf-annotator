@@ -1,5 +1,5 @@
-export const PLUGIN_ID = 'pdf-annotator';
-export const VIEW_TYPE = 'pdf-annotator-view';
+export const PLUGIN_ID = 'pencil';
+export const VIEW_TYPE = 'pencil-view';
 
 export const DEFAULT_PEN_COLOR = '#000000';
 export const DEFAULT_PEN_WIDTH = 3;

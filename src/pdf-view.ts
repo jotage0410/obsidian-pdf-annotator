@@ -32,11 +32,11 @@ export class PDFAnnotatorView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return this.file?.basename ?? 'PDF Annotator';
+		return this.file?.basename ?? 'Pencil';
 	}
 
 	getIcon(): string {
-		return 'file-text';
+		return 'pencil';
 	}
 
 	async onOpen(): Promise<void> {
@@ -50,14 +50,38 @@ export class PDFAnnotatorView extends ItemView {
 		container.addClass('pdf-annotator-container');
 	}
 
+	async setState(state: any, result: any): Promise<void> {
+		if (state.file) {
+			const file = this.app.vault.getAbstractFileByPath(state.file);
+			if (file instanceof TFile) {
+				await this.loadFile(file);
+			}
+		}
+		await super.setState(state, result);
+	}
+
+	getState(): any {
+		const state = super.getState();
+		if (this.file) {
+			state.file = this.file.path;
+		}
+		return state;
+	}
+
 	async loadFile(file: TFile): Promise<void> {
+		// Clean up previous state if reloading
+		await this.cleanup();
+
 		this.file = file;
+		// Update the tab header to show the file name
+		(this.leaf as any).updateHeader?.();
 
 		const container = this.contentEl;
 		container.empty();
+		container.addClass('pdf-annotator-container');
 
-		// Create scroll container for PDF pages
-		const scrollContainer = container.createDiv({ cls: 'pdf-annotator-container' });
+		// Use contentEl directly as scroll container (avoid nesting overflow containers)
+		const scrollContainer = container;
 
 		// Create toast element
 		this.toastEl = document.createElement('div');
@@ -81,7 +105,7 @@ export class PDFAnnotatorView extends ItemView {
 		const pdfData = await this.app.vault.readBinary(file);
 		const hash = await this.storage.computePdfHash(pdfData);
 		if (annotationData.pdfHash && annotationData.pdfHash !== hash && annotationData.pdfHash !== 'unknown') {
-			console.warn('PDF Annotator: PDF has been modified since annotations were saved');
+			console.warn('Pencil: PDF has been modified since annotations were saved');
 		}
 		this.storage.setPdfHash(hash);
 
@@ -209,13 +233,12 @@ export class PDFAnnotatorView extends ItemView {
 		}, 1500);
 	}
 
-	async onClose(): Promise<void> {
+	private async cleanup(): Promise<void> {
 		if (this.boundKeyHandler) {
 			document.removeEventListener('keydown', this.boundKeyHandler);
 			this.boundKeyHandler = null;
 		}
 
-		// Save before closing
 		if (this.storage) {
 			await this.storage.saveNow();
 			this.storage.destroy();
@@ -237,13 +260,17 @@ export class PDFAnnotatorView extends ItemView {
 			this.renderer.destroy();
 			this.renderer = null;
 		}
-		if (this.styleEl) {
-			this.styleEl.remove();
-			this.styleEl = null;
-		}
 		if (this.toastEl) {
 			this.toastEl.remove();
 			this.toastEl = null;
+		}
+	}
+
+	async onClose(): Promise<void> {
+		await this.cleanup();
+		if (this.styleEl) {
+			this.styleEl.remove();
+			this.styleEl = null;
 		}
 	}
 }

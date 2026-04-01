@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-pdf-annotator",
+	"name": "obsidian-pencil",
 	"version": "0.1.0",
-	"description": "Obsidian plugin for PDF annotation with stylus support",
+	"description": "Pencil - Obsidian plugin for PDF annotation with stylus support",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

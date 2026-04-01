@@ -44,7 +44,7 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'PDF Annotator Settings' });
+		containerEl.createEl('h2', { text: 'Pencil Settings' });
 
 		// Default tool
 		new Setting(containerEl)
