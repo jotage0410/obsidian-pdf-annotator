@@ -1,0 +1,299 @@
+import { DrawingEngine } from './drawing-engine';
+import { InputManager } from './input-manager';
+import type { Stroke, TextHighlight } from './types';
+import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH } from './constants';
+
+export class AnnotationCanvas {
+	private canvas: HTMLCanvasElement;
+	private ctx: CanvasRenderingContext2D;
+	private drawingEngine: DrawingEngine;
+	private pageWidth: number;
+	private pageHeight: number;
+	private pageIndex: number;
+
+	// Drawing state
+	private isDrawing = false;
+	private currentStroke: Stroke | null = null;
+	private currentPixelPoints: [number, number, number][] = [];
+	private strokes: Stroke[] = [];
+	private textHighlights: TextHighlight[] = [];
+	private rafId: number | null = null;
+	private needsRender = false;
+
+	// Tool state
+	private activeTool: 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight' = 'pen';
+	private penColor = DEFAULT_PEN_COLOR;
+	private penWidth = DEFAULT_PEN_WIDTH;
+
+	// Input manager (shared across pages)
+	private inputManager: InputManager;
+
+	// Callbacks
+	private onStrokeAdded: ((stroke: Stroke, pageIndex: number) => void) | null = null;
+	private onStrokeRemoved: ((stroke: Stroke, pageIndex: number) => void) | null = null;
+
+	// Bound handlers for cleanup
+	private boundPointerDown: (e: PointerEvent) => void;
+	private boundPointerMove: (e: PointerEvent) => void;
+	private boundPointerUp: (e: PointerEvent) => void;
+
+	constructor(
+		annotationLayer: HTMLElement,
+		pageIndex: number,
+		pageWidth: number,
+		pageHeight: number,
+		inputManager?: InputManager,
+	) {
+		this.pageIndex = pageIndex;
+		this.pageWidth = pageWidth;
+		this.pageHeight = pageHeight;
+		this.drawingEngine = new DrawingEngine();
+		this.inputManager = inputManager ?? new InputManager();
+
+		const dpr = window.devicePixelRatio || 1;
+
+		// Create annotation canvas
+		this.canvas = document.createElement('canvas');
+		this.canvas.width = pageWidth * dpr;
+		this.canvas.height = pageHeight * dpr;
+		this.canvas.style.width = `${pageWidth}px`;
+		this.canvas.style.height = `${pageHeight}px`;
+
+		const ctx = this.canvas.getContext('2d');
+		if (!ctx) throw new Error('Failed to get 2D context');
+		ctx.scale(dpr, dpr);
+		this.ctx = ctx;
+
+		annotationLayer.appendChild(this.canvas);
+
+		// Bind event handlers
+		this.boundPointerDown = this.onPointerDown.bind(this);
+		this.boundPointerMove = this.onPointerMove.bind(this);
+		this.boundPointerUp = this.onPointerUp.bind(this);
+
+		this.canvas.addEventListener('pointerdown', this.boundPointerDown);
+		this.canvas.addEventListener('pointermove', this.boundPointerMove);
+		this.canvas.addEventListener('pointerup', this.boundPointerUp);
+		this.canvas.addEventListener('pointerleave', this.boundPointerUp);
+	}
+
+	setTool(tool: 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight'): void {
+		this.activeTool = tool;
+		if (tool === 'pan' || tool === 'text-highlight') {
+			this.canvas.style.pointerEvents = 'none';
+		} else {
+			this.canvas.style.pointerEvents = 'auto';
+		}
+	}
+
+	setColor(color: string): void {
+		this.penColor = color;
+	}
+
+	setWidth(width: number): void {
+		this.penWidth = width;
+	}
+
+	setOnStrokeAdded(cb: (stroke: Stroke, pageIndex: number) => void): void {
+		this.onStrokeAdded = cb;
+	}
+
+	setOnStrokeRemoved(cb: (stroke: Stroke, pageIndex: number) => void): void {
+		this.onStrokeRemoved = cb;
+	}
+
+	loadStrokes(strokes: Stroke[]): void {
+		this.strokes = [...strokes];
+		this.redraw();
+	}
+
+	addStroke(stroke: Stroke): void {
+		this.strokes.push(stroke);
+		this.redraw();
+	}
+
+	removeStroke(strokeId: string): Stroke | null {
+		const idx = this.strokes.findIndex(s => s.id === strokeId);
+		if (idx === -1) return null;
+		const removed = this.strokes.splice(idx, 1)[0];
+		this.redraw();
+		return removed;
+	}
+
+	getStrokes(): Stroke[] {
+		return [...this.strokes];
+	}
+
+	addTextHighlight(highlight: TextHighlight): void {
+		this.textHighlights.push(highlight);
+		this.redraw();
+	}
+
+	removeTextHighlight(highlightId: string): TextHighlight | null {
+		const idx = this.textHighlights.findIndex(h => h.id === highlightId);
+		if (idx === -1) return null;
+		const removed = this.textHighlights.splice(idx, 1)[0];
+		this.redraw();
+		return removed;
+	}
+
+	loadTextHighlights(highlights: TextHighlight[]): void {
+		this.textHighlights = [...highlights];
+		this.redraw();
+	}
+
+	getTextHighlights(): TextHighlight[] {
+		return [...this.textHighlights];
+	}
+
+	private onPointerDown(e: PointerEvent): void {
+		this.inputManager.onPointerDown(e);
+
+		// Update hover cursor
+		this.inputManager.updateHoverCursor(e, this.penWidth, this.penColor);
+
+		if (this.activeTool === 'pan' || this.activeTool === 'text-highlight') return;
+
+		// Palm rejection: check if this input should be handled
+		if (!this.inputManager.shouldHandleForDrawing(e)) return;
+
+		if (this.activeTool === 'eraser') {
+			this.handleEraserPoint(e);
+			return;
+		}
+
+		e.preventDefault();
+		this.canvas.setPointerCapture(e.pointerId);
+		this.inputManager.applyTouchAction(this.canvas, true);
+		this.isDrawing = true;
+
+		const { x, y } = this.getCanvasPoint(e);
+		const pressure = e.pressure || 0.5;
+
+		this.currentStroke = {
+			id: crypto.randomUUID(),
+			tool: this.activeTool as 'pen' | 'highlighter',
+			color: this.penColor,
+			maxWidth: this.penWidth,
+			points: [{ x: x / this.pageWidth, y: y / this.pageHeight, pressure }],
+		};
+
+		this.currentPixelPoints = [[x, y, pressure]];
+	}
+
+	private onPointerMove(e: PointerEvent): void {
+		// Update hover cursor on any pen move (including hover)
+		this.inputManager.updateHoverCursor(e, this.penWidth, this.penColor);
+
+		if (!this.inputManager.shouldHandleForDrawing(e)) return;
+
+		if (this.activeTool === 'eraser' && e.buttons > 0) {
+			this.handleEraserPoint(e);
+			return;
+		}
+
+		if (!this.isDrawing || !this.currentStroke) return;
+
+		e.preventDefault();
+
+		// Process coalesced events for smoothness
+		const events = e.getCoalescedEvents?.() ?? [e];
+		for (const ce of events) {
+			const { x, y } = this.getCanvasPoint(ce);
+			const pressure = ce.pressure || 0.5;
+
+			this.currentStroke.points.push({
+				x: x / this.pageWidth,
+				y: y / this.pageHeight,
+				pressure,
+			});
+			this.currentPixelPoints.push([x, y, pressure]);
+		}
+
+		// Throttle rendering to rAF (max 60fps)
+		if (!this.needsRender) {
+			this.needsRender = true;
+			this.rafId = requestAnimationFrame(() => {
+				this.needsRender = false;
+				this.redraw();
+				if (this.currentStroke && this.currentPixelPoints.length >= 2) {
+					this.drawingEngine.renderLiveStroke(
+						this.ctx,
+						this.currentPixelPoints,
+						this.currentStroke.color,
+						this.currentStroke.maxWidth,
+						this.currentStroke.tool,
+					);
+				}
+			});
+		}
+	}
+
+	private onPointerUp(e: PointerEvent): void {
+		this.inputManager.onPointerUp(e);
+		this.inputManager.applyTouchAction(this.canvas, false);
+
+		if (!this.isDrawing || !this.currentStroke) {
+			this.isDrawing = false;
+			return;
+		}
+
+		e.preventDefault();
+		this.isDrawing = false;
+
+		if (this.currentStroke.points.length >= 2) {
+			this.strokes.push(this.currentStroke);
+			if (this.onStrokeAdded) {
+				this.onStrokeAdded(this.currentStroke, this.pageIndex);
+			}
+		}
+
+		this.currentStroke = null;
+		this.currentPixelPoints = [];
+		this.redraw();
+	}
+
+	private handleEraserPoint(e: PointerEvent): void {
+		const { x, y } = this.getCanvasPoint(e);
+		const eraserRadius = 20;
+
+		for (let i = this.strokes.length - 1; i >= 0; i--) {
+			const stroke = this.strokes[i];
+			for (const pt of stroke.points) {
+				const px = pt.x * this.pageWidth;
+				const py = pt.y * this.pageHeight;
+				const dist = Math.hypot(px - x, py - y);
+				if (dist < eraserRadius) {
+					const removed = this.strokes.splice(i, 1)[0];
+					if (this.onStrokeRemoved) {
+						this.onStrokeRemoved(removed, this.pageIndex);
+					}
+					this.redraw();
+					break;
+				}
+			}
+		}
+	}
+
+	private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+		const rect = this.canvas.getBoundingClientRect();
+		return {
+			x: (e.clientX - rect.left) * (this.pageWidth / rect.width),
+			y: (e.clientY - rect.top) * (this.pageHeight / rect.height),
+		};
+	}
+
+	private redraw(): void {
+		this.drawingEngine.redrawAll(this.ctx, this.strokes, this.pageWidth, this.pageHeight, this.textHighlights);
+	}
+
+	destroy(): void {
+		if (this.rafId !== null) {
+			cancelAnimationFrame(this.rafId);
+		}
+		this.canvas.removeEventListener('pointerdown', this.boundPointerDown);
+		this.canvas.removeEventListener('pointermove', this.boundPointerMove);
+		this.canvas.removeEventListener('pointerup', this.boundPointerUp);
+		this.canvas.removeEventListener('pointerleave', this.boundPointerUp);
+	}
+}

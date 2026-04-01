@@ -1,0 +1,22 @@
+{
+	"name": "obsidian-pdf-annotator",
+	"version": "0.1.0",
+	"description": "Obsidian plugin for PDF annotation with stylus support",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+	},
+	"keywords": ["obsidian", "pdf", "annotation", "stylus", "handwriting"],
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"esbuild": "^0.21.0",
+		"obsidian": "latest",
+		"typescript": "^5.4.0"
+	},
+	"dependencies": {
+		"perfect-freehand": "^1.2.2",
+		"pdfjs-dist": "^4.4.168"
+	}
+}
