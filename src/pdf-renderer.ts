@@ -109,22 +109,33 @@ export class PDFRenderer {
 		if (visibleArr.length === 0) return;
 		const center = visibleArr.reduce((a, b) => a + b, 0) / visibleArr.length;
 
-		// Sort rendered pages by distance from center
+		// Sort rendered pages by distance from center (furthest first)
 		const rendered = [...this.renderedPages].sort(
 			(a, b) => Math.abs(b - center) - Math.abs(a - center)
 		);
 
-		// Evict furthest pages until under limit
-		while (rendered.length > MAX_CACHED_PAGES) {
-			const pageToEvict = rendered.shift()!;
-			// Don't evict visible pages or buffer
+		// Evict furthest pages until under limit, but never evict visible or buffer pages
+		let evicted = 0;
+		for (const pageToEvict of rendered) {
+			if (this.renderedPages.size - evicted <= MAX_CACHED_PAGES) break;
+
+			// Don't evict visible pages or their buffers
 			if (this.visiblePages.has(pageToEvict)) continue;
+
+			let isBuffer = false;
+			for (const vp of this.visiblePages) {
+				if (Math.abs(pageToEvict - vp) <= BUFFER_PAGES) {
+					isBuffer = true;
+					break;
+				}
+			}
+			if (isBuffer) continue;
 
 			const wrapper = this.pageWrappers.get(pageToEvict);
 			if (wrapper) {
 				const vp = this.pageViewports.get(pageToEvict);
 				// Replace with placeholder, keeping dimensions
-				wrapper.empty();
+				wrapper.innerHTML = '';
 				const placeholder = document.createElement('div');
 				placeholder.className = 'pdf-page-placeholder';
 				placeholder.textContent = `Page ${pageToEvict + 1}`;
@@ -139,6 +150,7 @@ export class PDFRenderer {
 				}
 			}
 			this.renderedPages.delete(pageToEvict);
+			evicted++;
 		}
 	}
 
@@ -153,7 +165,7 @@ export class PDFRenderer {
 		const wrapper = this.pageWrappers.get(pageIndex);
 		if (!wrapper) return;
 
-		wrapper.empty();
+		wrapper.innerHTML = '';
 		wrapper.style.width = `${viewport.width}px`;
 		wrapper.style.height = `${viewport.height}px`;
 
@@ -171,15 +183,41 @@ export class PDFRenderer {
 
 		wrapper.appendChild(canvas);
 
+		// Create text layer
 		const textLayerDiv = document.createElement('div');
 		textLayerDiv.className = 'text-layer';
 		wrapper.appendChild(textLayerDiv);
 
+		// Render PDF page to canvas
+		await page.render({ canvasContext: ctx, viewport }).promise;
+
+		// Render text layer for text selection
+		try {
+			const textContent = await page.getTextContent();
+			// Use TextLayer API (pdfjs-dist v4+)
+			if ((pdfjsLib as any).TextLayer) {
+				const textLayer = new (pdfjsLib as any).TextLayer({
+					textContentSource: textContent,
+					container: textLayerDiv,
+					viewport,
+				});
+				await textLayer.render();
+			} else if ((pdfjsLib as any).renderTextLayer) {
+				// Fallback for older versions
+				await (pdfjsLib as any).renderTextLayer({
+					textContent,
+					container: textLayerDiv,
+					viewport,
+				}).promise;
+			}
+		} catch (e) {
+			console.warn('Pencil: Failed to render text layer for page', pageIndex + 1, e);
+		}
+
+		// Create annotation layer
 		const annotationLayer = document.createElement('div');
 		annotationLayer.className = 'annotation-layer';
 		wrapper.appendChild(annotationLayer);
-
-		await page.render({ canvasContext: ctx, viewport }).promise;
 
 		if (this.onPageReady) {
 			this.onPageReady(pageIndex, wrapper, {

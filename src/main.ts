@@ -1,4 +1,4 @@
-import { Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, Notice } from 'obsidian';
 import { VIEW_TYPE } from './constants';
 import { PDFAnnotatorView } from './pdf-view';
 import { PDFAnnotatorSettingTab, DEFAULT_SETTINGS } from './settings';
@@ -11,7 +11,11 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		await this.loadSettings();
 
 		// Register the custom PDF view
-		this.registerView(VIEW_TYPE, (leaf) => new PDFAnnotatorView(leaf));
+		this.registerView(VIEW_TYPE, (leaf) => {
+			const view = new PDFAnnotatorView(leaf);
+			view.setSettings(this.settings);
+			return view;
+		});
 
 		// Register to handle .pdf files
 		this.registerExtensions(['pdf'], VIEW_TYPE);
@@ -21,10 +25,15 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		// Add ribbon icon to open PDF
 		this.addRibbonIcon('pencil', 'Pencil - Open PDF', () => {
-			const pdfFiles = this.app.vault.getFiles().filter(f => f.extension === 'pdf');
-			if (pdfFiles.length > 0) {
-				this.openPDF(pdfFiles[0]);
+			// Try to open the currently active file if it's a PDF
+			const activeFile = this.app.workspace.getActiveFile();
+			if (activeFile?.extension === 'pdf') {
+				this.openPDF(activeFile);
+				return;
 			}
+
+			// Otherwise show a notice
+			new Notice('Select a PDF file to open with Pencil');
 		});
 
 		// Command to open PDF in annotator
@@ -58,11 +67,13 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		await leaf.setViewState({
 			type: VIEW_TYPE,
 			active: true,
+			state: { file: file.path },
 		});
 
+		// Pass updated settings to the view
 		const view = leaf.view as PDFAnnotatorView;
-		if (view && view.loadFile) {
-			await view.loadFile(file);
+		if (view && view.setSettings) {
+			view.setSettings(this.settings);
 		}
 
 		this.app.workspace.revealLeaf(leaf);

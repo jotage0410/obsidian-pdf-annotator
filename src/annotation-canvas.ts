@@ -1,7 +1,7 @@
 import { DrawingEngine } from './drawing-engine';
 import { InputManager } from './input-manager';
 import type { Stroke, TextHighlight } from './types';
-import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH } from './constants';
+import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH, DEFAULT_ERASER_RADIUS } from './constants';
 
 export class AnnotationCanvas {
 	private canvas: HTMLCanvasElement;
@@ -24,6 +24,7 @@ export class AnnotationCanvas {
 	private activeTool: 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight' = 'pen';
 	private penColor = DEFAULT_PEN_COLOR;
 	private penWidth = DEFAULT_PEN_WIDTH;
+	private eraserRadius = DEFAULT_ERASER_RADIUS;
 
 	// Input manager (shared across pages)
 	private inputManager: InputManager;
@@ -75,6 +76,7 @@ export class AnnotationCanvas {
 		this.canvas.addEventListener('pointermove', this.boundPointerMove);
 		this.canvas.addEventListener('pointerup', this.boundPointerUp);
 		this.canvas.addEventListener('pointerleave', this.boundPointerUp);
+		this.canvas.addEventListener('pointercancel', this.boundPointerUp);
 	}
 
 	setTool(tool: 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight'): void {
@@ -92,6 +94,10 @@ export class AnnotationCanvas {
 
 	setWidth(width: number): void {
 		this.penWidth = width;
+	}
+
+	setEraserRadius(radius: number): void {
+		this.eraserRadius = radius;
 	}
 
 	setOnStrokeAdded(cb: (stroke: Stroke, pageIndex: number) => void): void {
@@ -216,13 +222,16 @@ export class AnnotationCanvas {
 			this.rafId = requestAnimationFrame(() => {
 				this.needsRender = false;
 				this.redraw();
-				if (this.currentStroke && this.currentPixelPoints.length >= 2) {
+				// Guard against race: currentStroke may have been nulled by onPointerUp
+				const stroke = this.currentStroke;
+				const points = this.currentPixelPoints;
+				if (stroke && points.length >= 2) {
 					this.drawingEngine.renderLiveStroke(
 						this.ctx,
-						this.currentPixelPoints,
-						this.currentStroke.color,
-						this.currentStroke.maxWidth,
-						this.currentStroke.tool,
+						points,
+						stroke.color,
+						stroke.maxWidth,
+						stroke.tool,
 					);
 				}
 			});
@@ -232,6 +241,15 @@ export class AnnotationCanvas {
 	private onPointerUp(e: PointerEvent): void {
 		this.inputManager.onPointerUp(e);
 		this.inputManager.applyTouchAction(this.canvas, false);
+
+		// Release pointer capture if held
+		try {
+			if (this.canvas.hasPointerCapture(e.pointerId)) {
+				this.canvas.releasePointerCapture(e.pointerId);
+			}
+		} catch {
+			// Ignore if pointer capture was already released
+		}
 
 		if (!this.isDrawing || !this.currentStroke) {
 			this.isDrawing = false;
@@ -255,31 +273,40 @@ export class AnnotationCanvas {
 
 	private handleEraserPoint(e: PointerEvent): void {
 		const { x, y } = this.getCanvasPoint(e);
-		const eraserRadius = 20;
+		const removedStrokes: Stroke[] = [];
 
+		// Check all strokes, collect all that collide (don't break on first)
 		for (let i = this.strokes.length - 1; i >= 0; i--) {
 			const stroke = this.strokes[i];
 			for (const pt of stroke.points) {
 				const px = pt.x * this.pageWidth;
 				const py = pt.y * this.pageHeight;
 				const dist = Math.hypot(px - x, py - y);
-				if (dist < eraserRadius) {
+				if (dist < this.eraserRadius) {
 					const removed = this.strokes.splice(i, 1)[0];
-					if (this.onStrokeRemoved) {
-						this.onStrokeRemoved(removed, this.pageIndex);
-					}
-					this.redraw();
-					break;
+					removedStrokes.push(removed);
+					break; // Break inner loop (points), continue outer (strokes)
 				}
 			}
+		}
+
+		if (removedStrokes.length > 0) {
+			for (const removed of removedStrokes) {
+				if (this.onStrokeRemoved) {
+					this.onStrokeRemoved(removed, this.pageIndex);
+				}
+			}
+			this.redraw(); // Single redraw for all removals
 		}
 	}
 
 	private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
 		const rect = this.canvas.getBoundingClientRect();
+		const w = rect.width || 1; // Prevent division by zero
+		const h = rect.height || 1;
 		return {
-			x: (e.clientX - rect.left) * (this.pageWidth / rect.width),
-			y: (e.clientY - rect.top) * (this.pageHeight / rect.height),
+			x: (e.clientX - rect.left) * (this.pageWidth / w),
+			y: (e.clientY - rect.top) * (this.pageHeight / h),
 		};
 	}
 
@@ -295,5 +322,6 @@ export class AnnotationCanvas {
 		this.canvas.removeEventListener('pointermove', this.boundPointerMove);
 		this.canvas.removeEventListener('pointerup', this.boundPointerUp);
 		this.canvas.removeEventListener('pointerleave', this.boundPointerUp);
+		this.canvas.removeEventListener('pointercancel', this.boundPointerUp);
 	}
 }

@@ -7,7 +7,9 @@ import { ToolState } from './tool-state';
 import { Toolbar } from './toolbar';
 import { HistoryManager } from './history';
 import { AnnotationStorage } from './storage';
-import type { Stroke } from './types';
+import { TextHighlighterTool } from './tools/text-highlighter';
+import type { Stroke, TextHighlight } from './types';
+import type { PDFAnnotatorSettings } from './settings';
 import styles from './styles.css';
 
 export class PDFAnnotatorView extends ItemView {
@@ -15,16 +17,25 @@ export class PDFAnnotatorView extends ItemView {
 	private file: TFile | null = null;
 	private styleEl: HTMLStyleElement | null = null;
 	private annotationCanvases: Map<number, AnnotationCanvas> = new Map();
+	private textHighlighters: Map<number, TextHighlighterTool> = new Map();
 	private inputManager: InputManager = new InputManager();
 	private toolState: ToolState = new ToolState();
 	private toolbar: Toolbar | null = null;
 	private historyManager: HistoryManager = new HistoryManager();
 	private storage: AnnotationStorage | null = null;
 	private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+	private toolStateListener: (() => void) | null = null;
 	private toastEl: HTMLElement | null = null;
+
+	// Plugin settings (set externally via setSettings)
+	private pluginSettings: PDFAnnotatorSettings | null = null;
 
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
+	}
+
+	setSettings(settings: PDFAnnotatorSettings): void {
+		this.pluginSettings = settings;
 	}
 
 	getViewType(): string {
@@ -40,10 +51,13 @@ export class PDFAnnotatorView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		// Inject styles
-		this.styleEl = document.createElement('style');
-		this.styleEl.textContent = styles;
-		document.head.appendChild(this.styleEl);
+		// Inject styles (only once globally)
+		if (!document.querySelector('style[data-pencil-styles]')) {
+			this.styleEl = document.createElement('style');
+			this.styleEl.setAttribute('data-pencil-styles', '');
+			this.styleEl.textContent = styles;
+			document.head.appendChild(this.styleEl);
+		}
 
 		const container = this.contentEl;
 		container.empty();
@@ -82,6 +96,12 @@ export class PDFAnnotatorView extends ItemView {
 
 		// Use contentEl directly as scroll container (avoid nesting overflow containers)
 		const scrollContainer = container;
+
+		// Apply plugin settings to input manager and tool state
+		this.applySettings();
+
+		// Create hover cursor
+		this.inputManager.createHoverCursor(document.body);
 
 		// Create toast element
 		this.toastEl = document.createElement('div');
@@ -158,14 +178,25 @@ export class PDFAnnotatorView extends ItemView {
 		};
 		document.addEventListener('keydown', this.boundKeyHandler);
 
-		// Sync tool state changes to all annotation canvases
-		this.toolState.on(() => {
+		// Sync tool state changes to all annotation canvases and text highlighters
+		this.toolStateListener = () => {
 			for (const canvas of this.annotationCanvases.values()) {
 				canvas.setTool(this.toolState.activeTool as 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight');
 				canvas.setColor(this.toolState.getCurrentColor());
 				canvas.setWidth(this.toolState.getCurrentWidth());
 			}
-		});
+
+			// Activate/deactivate text highlighters based on tool
+			for (const highlighter of this.textHighlighters.values()) {
+				if (this.toolState.activeTool === 'text-highlight') {
+					highlighter.setColor(this.toolState.getCurrentColor());
+					highlighter.activate();
+				} else {
+					highlighter.deactivate();
+				}
+			}
+		};
+		this.toolState.on(this.toolStateListener);
 
 		// Initialize renderer
 		this.renderer = new PDFRenderer(scrollContainer);
@@ -173,7 +204,10 @@ export class PDFAnnotatorView extends ItemView {
 		// Set up annotation canvases when pages render
 		this.renderer.setOnPageReady((pageIndex, wrapper, viewport) => {
 			const annotationLayer = wrapper.querySelector('.annotation-layer') as HTMLElement;
-			if (!annotationLayer) return;
+			if (!annotationLayer) {
+				console.warn('Pencil: annotation layer not found for page', pageIndex + 1);
+				return;
+			}
 
 			const annotCanvas = new AnnotationCanvas(
 				annotationLayer,
@@ -187,6 +221,11 @@ export class PDFAnnotatorView extends ItemView {
 			annotCanvas.setTool(this.toolState.activeTool as 'pen' | 'highlighter' | 'eraser' | 'pan' | 'text-highlight');
 			annotCanvas.setColor(this.toolState.getCurrentColor());
 			annotCanvas.setWidth(this.toolState.getCurrentWidth());
+
+			// Apply eraser radius from settings
+			if (this.pluginSettings) {
+				annotCanvas.setEraserRadius(this.pluginSettings.eraserRadius);
+			}
 
 			// Load saved annotations for this page
 			if (this.storage) {
@@ -210,9 +249,51 @@ export class PDFAnnotatorView extends ItemView {
 			});
 
 			this.annotationCanvases.set(pageIndex, annotCanvas);
+
+			// Set up text highlighter for this page
+			const textLayerEl = wrapper.querySelector('.text-layer') as HTMLElement;
+			if (textLayerEl) {
+				const textHighlighter = new TextHighlighterTool(
+					wrapper,
+					textLayerEl,
+					pageIndex,
+					viewport.width,
+					viewport.height,
+					this.toolState.getCurrentColor(),
+				);
+
+				textHighlighter.setOnHighlightAdded((highlight: TextHighlight) => {
+					annotCanvas.addTextHighlight(highlight);
+					this.historyManager.push({ type: 'add-highlight', pageIndex, data: highlight });
+					this.persistPage(pageIndex);
+				});
+
+				// Activate if text-highlight tool is currently selected
+				if (this.toolState.activeTool === 'text-highlight') {
+					textHighlighter.activate();
+				}
+
+				this.textHighlighters.set(pageIndex, textHighlighter);
+			}
 		});
 
 		await this.renderer.loadPDF(pdfData);
+	}
+
+	private applySettings(): void {
+		if (!this.pluginSettings) return;
+
+		const s = this.pluginSettings;
+
+		// Apply input mode and hover cursor setting
+		this.inputManager.setMode(s.inputMode);
+		this.inputManager.setShowHoverCursor(s.showHoverCursor);
+
+		// Apply default tool
+		this.toolState.setTool(s.defaultTool);
+		this.toolState.setPenColor(s.defaultPenColor);
+		this.toolState.setPenWidth(s.defaultPenWidth);
+		this.toolState.setHighlighterColor(s.defaultHighlighterColor);
 	}
 
 	private persistPage(pageIndex: number): void {
@@ -239,6 +320,12 @@ export class PDFAnnotatorView extends ItemView {
 			this.boundKeyHandler = null;
 		}
 
+		// Remove tool state listener to prevent memory leak
+		if (this.toolStateListener) {
+			this.toolState.off(this.toolStateListener);
+			this.toolStateListener = null;
+		}
+
 		if (this.storage) {
 			await this.storage.saveNow();
 			this.storage.destroy();
@@ -249,6 +336,12 @@ export class PDFAnnotatorView extends ItemView {
 			canvas.destroy();
 		}
 		this.annotationCanvases.clear();
+
+		// Deactivate and clean up text highlighters
+		for (const highlighter of this.textHighlighters.values()) {
+			highlighter.deactivate();
+		}
+		this.textHighlighters.clear();
 
 		this.historyManager.clear();
 
@@ -264,6 +357,9 @@ export class PDFAnnotatorView extends ItemView {
 			this.toastEl.remove();
 			this.toastEl = null;
 		}
+
+		// Clean up hover cursor
+		this.inputManager.destroyHoverCursor();
 	}
 
 	async onClose(): Promise<void> {
