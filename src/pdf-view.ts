@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
-import { VIEW_TYPE } from './constants';
+import { VIEW_TYPE, MAX_PDF_SIZE_MB } from './constants';
 import { PDFRenderer } from './pdf-renderer';
 import { AnnotationCanvas } from './annotation-canvas';
 import { InputManager } from './input-manager';
@@ -137,8 +137,14 @@ export class PDFAnnotatorView extends ItemView {
 		// Load existing annotations
 		const annotationData = await this.storage.load();
 
-		// Compute PDF hash
+		// Load PDF data and validate size
 		const pdfData = await this.app.vault.readBinary(file);
+		const sizeMB = pdfData.byteLength / (1024 * 1024);
+		if (sizeMB > MAX_PDF_SIZE_MB) {
+			throw new Error(`PDF is too large (${sizeMB.toFixed(0)} MB). Maximum supported size is ${MAX_PDF_SIZE_MB} MB.`);
+		}
+
+		// Compute PDF hash
 		const hash = await this.storage.computePdfHash(pdfData);
 		if (annotationData.pdfHash && annotationData.pdfHash !== hash && annotationData.pdfHash !== 'unknown') {
 			console.warn('Pencil: PDF has been modified since annotations were saved');
@@ -225,6 +231,26 @@ export class PDFAnnotatorView extends ItemView {
 		// Initialize renderer
 		this.renderer = new PDFRenderer(scrollContainer);
 
+		// Clean up resources when pages are evicted
+		this.renderer.setOnPageEvicted((pageIndex) => {
+			// Persist page data before cleanup
+			this.persistPage(pageIndex);
+
+			// Destroy and remove canvas
+			const canvas = this.annotationCanvases.get(pageIndex);
+			if (canvas) {
+				canvas.destroy();
+				this.annotationCanvases.delete(pageIndex);
+			}
+
+			// Deactivate and remove text highlighter
+			const highlighter = this.textHighlighters.get(pageIndex);
+			if (highlighter) {
+				highlighter.deactivate();
+				this.textHighlighters.delete(pageIndex);
+			}
+		});
+
 		// Set up annotation canvases when pages render
 		this.renderer.setOnPageReady((pageIndex, wrapper, viewport) => {
 			const annotationLayer = wrapper.querySelector('.annotation-layer') as HTMLElement;
@@ -269,6 +295,10 @@ export class PDFAnnotatorView extends ItemView {
 			});
 			annotCanvas.setOnStrokeRemoved((stroke, pi) => {
 				this.historyManager.push({ type: 'remove-stroke', pageIndex: pi, data: stroke });
+				this.persistPage(pi);
+			});
+			annotCanvas.setOnTextHighlightRemoved((highlight, pi) => {
+				this.historyManager.push({ type: 'remove-highlight', pageIndex: pi, data: highlight });
 				this.persistPage(pi);
 			});
 

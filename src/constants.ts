@@ -35,5 +35,8 @@ export const HISTORY_LIMIT = 50;
 
 export const SCROLL_THRESHOLD = 20;
 
+export const MAX_POINTS_PER_STROKE = 10000;
+export const MAX_PDF_SIZE_MB = 200;
+
 export const ANNOTATION_FILE_SUFFIX = '.annotations.json';
 export const ANNOTATION_VERSION = 1;

@@ -16,6 +16,7 @@ export class PDFRenderer {
 	private scale = 1.5;
 	private renderGeneration: Map<number, number> = new Map();
 	private onPageReady: ((pageIndex: number, wrapper: HTMLElement, viewport: { width: number; height: number }) => void) | null = null;
+	private onPageEvicted: ((pageIndex: number) => void) | null = null;
 
 	constructor(containerEl: HTMLElement) {
 		this.containerEl = containerEl;
@@ -23,6 +24,10 @@ export class PDFRenderer {
 
 	setOnPageReady(cb: (pageIndex: number, wrapper: HTMLElement, viewport: { width: number; height: number }) => void) {
 		this.onPageReady = cb;
+	}
+
+	setOnPageEvicted(cb: (pageIndex: number) => void) {
+		this.onPageEvicted = cb;
 	}
 
 	async loadPDF(data: ArrayBuffer): Promise<void> {
@@ -154,6 +159,7 @@ export class PDFRenderer {
 			this.renderedPages.delete(pageToEvict);
 			// Bump generation to cancel any in-flight renders
 			this.renderGeneration.set(pageToEvict, (this.renderGeneration.get(pageToEvict) ?? 0) + 1);
+			this.onPageEvicted?.(pageToEvict);
 			evicted++;
 		}
 	}

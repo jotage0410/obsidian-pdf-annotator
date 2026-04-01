@@ -1,7 +1,7 @@
 import { DrawingEngine } from './drawing-engine';
 import { InputManager } from './input-manager';
 import type { Stroke, TextHighlight } from './types';
-import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH, DEFAULT_ERASER_RADIUS } from './constants';
+import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH, DEFAULT_ERASER_RADIUS, MAX_POINTS_PER_STROKE } from './constants';
 import { generateId } from './utils';
 
 export class AnnotationCanvas {
@@ -33,6 +33,7 @@ export class AnnotationCanvas {
 	// Callbacks
 	private onStrokeAdded: ((stroke: Stroke, pageIndex: number) => void) | null = null;
 	private onStrokeRemoved: ((stroke: Stroke, pageIndex: number) => void) | null = null;
+	private onTextHighlightRemoved: ((highlight: TextHighlight, pageIndex: number) => void) | null = null;
 
 	// Bound handlers for cleanup
 	private boundPointerDown: (e: PointerEvent) => void;
@@ -105,6 +106,10 @@ export class AnnotationCanvas {
 
 	setOnStrokeRemoved(cb: (stroke: Stroke, pageIndex: number) => void): void {
 		this.onStrokeRemoved = cb;
+	}
+
+	setOnTextHighlightRemoved(cb: (highlight: TextHighlight, pageIndex: number) => void): void {
+		this.onTextHighlightRemoved = cb;
 	}
 
 	loadStrokes(strokes: Stroke[]): void {
@@ -204,6 +209,9 @@ export class AnnotationCanvas {
 		// Process coalesced events for smoothness
 		const events = e.getCoalescedEvents?.() ?? [e];
 		for (const ce of events) {
+			// Enforce max points per stroke to prevent memory issues
+			if (this.currentStroke.points.length >= MAX_POINTS_PER_STROKE) break;
+
 			const { x, y } = this.getCanvasPoint(ce);
 			const pressure = ce.pressure || 0.5;
 
@@ -274,10 +282,12 @@ export class AnnotationCanvas {
 		// Process coalesced events for smooth eraser path
 		const events = e.getCoalescedEvents?.() ?? [e];
 		const removedStrokes: Stroke[] = [];
+		const removedHighlights: TextHighlight[] = [];
 
 		for (const ce of events) {
 			const { x, y } = this.getCanvasPoint(ce);
 
+			// Erase strokes
 			for (let i = this.strokes.length - 1; i >= 0; i--) {
 				const stroke = this.strokes[i];
 				for (const pt of stroke.points) {
@@ -291,14 +301,40 @@ export class AnnotationCanvas {
 					}
 				}
 			}
+
+			// Erase text highlights
+			const nx = x / this.pageWidth;
+			const ny = y / this.pageHeight;
+			for (let i = this.textHighlights.length - 1; i >= 0; i--) {
+				const highlight = this.textHighlights[i];
+				for (const rect of highlight.rects) {
+					if (nx >= rect.x && nx <= rect.x + rect.width &&
+						ny >= rect.y && ny <= rect.y + rect.height) {
+						const removed = this.textHighlights.splice(i, 1)[0];
+						removedHighlights.push(removed);
+						break;
+					}
+				}
+			}
 		}
+
+		let needsRedraw = false;
 
 		if (removedStrokes.length > 0) {
 			for (const removed of removedStrokes) {
-				if (this.onStrokeRemoved) {
-					this.onStrokeRemoved(removed, this.pageIndex);
-				}
+				this.onStrokeRemoved?.(removed, this.pageIndex);
 			}
+			needsRedraw = true;
+		}
+
+		if (removedHighlights.length > 0) {
+			for (const removed of removedHighlights) {
+				this.onTextHighlightRemoved?.(removed, this.pageIndex);
+			}
+			needsRedraw = true;
+		}
+
+		if (needsRedraw) {
 			this.redraw();
 		}
 	}
