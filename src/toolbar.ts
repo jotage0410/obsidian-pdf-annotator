@@ -159,11 +159,7 @@ export class Toolbar {
 		const customInput = document.createElement('input');
 		customInput.type = 'color';
 		customInput.value = this.toolState.getCurrentColor();
-		customInput.style.width = '20px';
-		customInput.style.height = '20px';
-		customInput.style.border = 'none';
-		customInput.style.padding = '0';
-		customInput.style.cursor = 'pointer';
+		customInput.className = 'custom-color-input';
 		customInput.setAttribute('aria-label', 'Custom color');
 		customInput.addEventListener('input', () => {
 			if (this.toolState.activeTool === 'highlighter') {

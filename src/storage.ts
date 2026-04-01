@@ -8,7 +8,10 @@ export class AnnotationStorage {
 	private annotationPath: string;
 	private data: AnnotationData;
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
+	private isSaving = false;
+	private pendingSave = false;
 	private onSaved: (() => void) | null = null;
+	private autoSaveDelay: number = AUTOSAVE_DELAY_MS;
 
 	constructor(app: App, pdfPath: string) {
 		this.app = app;
@@ -21,6 +24,10 @@ export class AnnotationStorage {
 		};
 	}
 
+	setAutoSaveDelay(delay: number): void {
+		this.autoSaveDelay = delay;
+	}
+
 	setOnSaved(cb: () => void): void {
 		this.onSaved = cb;
 	}
@@ -31,13 +38,17 @@ export class AnnotationStorage {
 			if (!exists) return this.data;
 
 			const raw = await this.app.vault.adapter.read(this.annotationPath);
-			const parsed = JSON.parse(raw) as AnnotationData;
+			const parsed = JSON.parse(raw);
 
-			if (parsed.version && parsed.pages) {
-				this.data = parsed;
+			// Validate loaded data structure
+			if (!this.isValidAnnotationData(parsed)) {
+				console.warn('Pencil: Invalid annotation data format, starting fresh');
+				return this.data;
 			}
+
+			this.data = parsed;
 		} catch (e) {
-			console.warn('PDF Annotator: Failed to load annotations, starting fresh', e);
+			console.warn('Pencil: Failed to load annotations, starting fresh', e);
 			// Backup corrupted file
 			try {
 				const exists = await this.app.vault.adapter.exists(this.annotationPath);
@@ -92,10 +103,16 @@ export class AnnotationStorage {
 		if (this.saveTimer) {
 			clearTimeout(this.saveTimer);
 		}
-		this.saveTimer = setTimeout(() => this.save(), AUTOSAVE_DELAY_MS);
+		this.saveTimer = setTimeout(() => this.save(), this.autoSaveDelay);
 	}
 
 	async save(): Promise<void> {
+		// Prevent concurrent saves
+		if (this.isSaving) {
+			this.pendingSave = true;
+			return;
+		}
+		this.isSaving = true;
 		try {
 			const json = JSON.stringify(this.data, null, 2);
 			await this.app.vault.adapter.write(this.annotationPath, json);
@@ -103,8 +120,29 @@ export class AnnotationStorage {
 				this.onSaved();
 			}
 		} catch (e) {
-			console.error('PDF Annotator: Failed to save annotations', e);
+			console.error('Pencil: Failed to save annotations', e);
+		} finally {
+			this.isSaving = false;
+			if (this.pendingSave) {
+				this.pendingSave = false;
+				this.scheduleSave();
+			}
 		}
+	}
+
+	private isValidAnnotationData(data: unknown): data is AnnotationData {
+		if (typeof data !== 'object' || data === null) return false;
+		const obj = data as Record<string, unknown>;
+		if (typeof obj.version !== 'number') return false;
+		if (typeof obj.pages !== 'object' || obj.pages === null) return false;
+		// Validate each page has expected structure
+		for (const [, page] of Object.entries(obj.pages as Record<string, unknown>)) {
+			if (typeof page !== 'object' || page === null) return false;
+			const p = page as Record<string, unknown>;
+			if (!Array.isArray(p.strokes)) return false;
+			if (!Array.isArray(p.textHighlights)) return false;
+		}
+		return true;
 	}
 
 	async saveNow(): Promise<void> {

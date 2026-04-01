@@ -1,4 +1,4 @@
-/* PDF Annotator Plugin Styles */
+/* Pencil Plugin Styles */
 
 .pdf-annotator-container {
 	width: 100%;
@@ -13,7 +13,7 @@
 	position: relative;
 	margin: 8px auto;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-	background: white;
+	background: var(--background-primary);
 	overflow: hidden;
 }
 
@@ -39,10 +39,15 @@
 	width: 100%;
 	height: 100%;
 	cursor: crosshair;
+	touch-action: pan-x pan-y;
 }
 
-.annotation-layer.pan-mode canvas {
-	cursor: grab;
+.annotation-layer canvas.drawing-active {
+	touch-action: none;
+}
+
+.annotation-layer canvas.tool-pan,
+.annotation-layer canvas.tool-text-highlight {
 	pointer-events: none;
 }
 
@@ -94,8 +99,10 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 32px;
-	height: 32px;
+	min-width: 36px;
+	min-height: 36px;
+	width: 36px;
+	height: 36px;
 	border: none;
 	border-radius: 6px;
 	background: transparent;
@@ -110,9 +117,14 @@
 	color: var(--text-normal);
 }
 
+.pdf-annotator-toolbar button:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
 .pdf-annotator-toolbar button.active {
 	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+	color: white;
 }
 
 .pdf-annotator-toolbar .separator {
@@ -129,8 +141,8 @@
 }
 
 .pdf-annotator-toolbar .color-swatch {
-	width: 20px;
-	height: 20px;
+	width: 24px;
+	height: 24px;
 	border-radius: 50%;
 	border: 2px solid var(--background-modifier-border);
 	cursor: pointer;
@@ -142,6 +154,11 @@
 	transform: scale(1.2);
 }
 
+.pdf-annotator-toolbar .color-swatch:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
 .pdf-annotator-toolbar .color-swatch.active {
 	border-color: var(--interactive-accent);
 	box-shadow: 0 0 0 2px var(--interactive-accent);
@@ -149,8 +166,29 @@
 
 .pdf-annotator-toolbar .width-slider {
 	width: 80px;
-	height: 4px;
+	height: 6px;
 	accent-color: var(--interactive-accent);
+}
+
+.pdf-annotator-toolbar .width-slider:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+/* Custom color picker input */
+.pdf-annotator-toolbar .custom-color-input {
+	width: 24px;
+	height: 24px;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	border-radius: 50%;
+	background: transparent;
+}
+
+.pdf-annotator-toolbar .custom-color-input:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 /* Color palette popup */
@@ -170,9 +208,10 @@
 
 /* Toast notification */
 .pdf-annotator-toast {
-	position: fixed;
+	position: sticky;
 	bottom: 20px;
-	right: 20px;
+	left: calc(100% - 100px);
+	width: fit-content;
 	padding: 8px 16px;
 	background: var(--background-primary-alt);
 	color: var(--text-muted);
@@ -193,7 +232,7 @@
 	position: fixed;
 	pointer-events: none;
 	border-radius: 50%;
-	border: 1.5px solid rgba(0, 0, 0, 0.5);
+	border: 1.5px solid var(--text-muted);
 	z-index: 50;
 	display: none;
 }
@@ -210,4 +249,16 @@
 	justify-content: center;
 	color: var(--text-faint);
 	font-size: 14px;
+}
+
+/* Error state */
+.pdf-annotator-error {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--text-muted);
+	font-size: 14px;
+	padding: 24px;
+	text-align: center;
 }

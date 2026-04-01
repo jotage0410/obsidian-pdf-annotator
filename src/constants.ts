@@ -1,5 +1,5 @@
-export const PLUGIN_ID = 'pdf-annotator';
-export const VIEW_TYPE = 'pdf-annotator-view';
+export const PLUGIN_ID = 'pencil';
+export const VIEW_TYPE = 'pencil-view';
 
 export const DEFAULT_PEN_COLOR = '#000000';
 export const DEFAULT_PEN_WIDTH = 3;
@@ -34,6 +34,9 @@ export const AUTOSAVE_DELAY_MS = 2000;
 export const HISTORY_LIMIT = 50;
 
 export const SCROLL_THRESHOLD = 20;
+
+export const MAX_POINTS_PER_STROKE = 10000;
+export const MAX_PDF_SIZE_MB = 200;
 
 export const ANNOTATION_FILE_SUFFIX = '.annotations.json';
 export const ANNOTATION_VERSION = 1;
