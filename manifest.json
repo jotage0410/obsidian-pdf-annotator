@@ -2,7 +2,7 @@
 	"id": "pencil",
 	"name": "Pencil",
 	"version": "0.1.0",
-	"minAppVersion": "1.4.0",
+	"minAppVersion": "1.5.16",
 	"description": "Annotate PDFs with stylus support, pressure sensitivity, palm rejection, text highlighting, and persistent annotations.",
 	"author": "Jotage",
 	"isDesktopOnly": false

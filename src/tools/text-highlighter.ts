@@ -1,4 +1,5 @@
 import type { TextHighlight, NormalizedRect } from '../types';
+import { generateId } from '../utils';
 
 export class TextHighlighterTool {
 	private pageWrapper: HTMLElement;
@@ -58,7 +59,7 @@ export class TextHighlighterTool {
 		if (rects.length === 0) return;
 
 		const highlight: TextHighlight = {
-			id: crypto.randomUUID(),
+			id: generateId(),
 			color: this.color,
 			text,
 			rects,

@@ -24,6 +24,7 @@ export class PDFAnnotatorView extends ItemView {
 	private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 	private toolStateListener: (() => void) | null = null;
 	private toastEl: HTMLElement | null = null;
+	private isLoading = false;
 
 	// Plugin settings (set externally via setSettings)
 	private pluginSettings: PDFAnnotatorSettings | null = null;
@@ -74,6 +75,27 @@ export class PDFAnnotatorView extends ItemView {
 	}
 
 	async loadFile(file: TFile): Promise<void> {
+		// Guard against concurrent loads
+		if (this.isLoading) return;
+		this.isLoading = true;
+
+		try {
+			await this.loadFileInternal(file);
+		} catch (e) {
+			console.error('Pencil: Failed to load PDF', e);
+			const container = this.contentEl;
+			container.empty();
+			container.addClass('pdf-annotator-container');
+			container.createEl('div', {
+				text: 'Failed to load PDF. The file may be corrupted or unsupported.',
+				cls: 'pdf-annotator-error',
+			});
+		} finally {
+			this.isLoading = false;
+		}
+	}
+
+	private async loadFileInternal(file: TFile): Promise<void> {
 		// Clean up previous state if reloading
 		await this.cleanup();
 
@@ -94,11 +116,11 @@ export class PDFAnnotatorView extends ItemView {
 		// Create hover cursor
 		this.inputManager.createHoverCursor(document.body);
 
-		// Create toast element
+		// Create toast element (inside scroll container, not document.body)
 		this.toastEl = document.createElement('div');
 		this.toastEl.className = 'pdf-annotator-toast';
 		this.toastEl.textContent = 'Saved';
-		document.body.appendChild(this.toastEl);
+		scrollContainer.appendChild(this.toastEl);
 
 		// Create toolbar
 		this.toolbar = new Toolbar(scrollContainer, this.toolState);
@@ -107,6 +129,9 @@ export class PDFAnnotatorView extends ItemView {
 
 		// Initialize storage
 		this.storage = new AnnotationStorage(this.app, file.path);
+		if (this.pluginSettings) {
+			this.storage.setAutoSaveDelay(this.pluginSettings.autoSaveDelay);
+		}
 		this.storage.setOnSaved(() => this.showToast('Saved'));
 
 		// Load existing annotations
@@ -130,12 +155,20 @@ export class PDFAnnotatorView extends ItemView {
 					canvas.removeStroke((action.data as Stroke).id);
 				} else if (action.type === 'remove-stroke') {
 					canvas.addStroke(action.data as Stroke);
+				} else if (action.type === 'add-highlight') {
+					canvas.removeTextHighlight((action.data as TextHighlight).id);
+				} else if (action.type === 'remove-highlight') {
+					canvas.addTextHighlight(action.data as TextHighlight);
 				}
 			} else {
 				if (action.type === 'add-stroke') {
 					canvas.addStroke(action.data as Stroke);
 				} else if (action.type === 'remove-stroke') {
 					canvas.removeStroke((action.data as Stroke).id);
+				} else if (action.type === 'add-highlight') {
+					canvas.addTextHighlight(action.data as TextHighlight);
+				} else if (action.type === 'remove-highlight') {
+					canvas.removeTextHighlight((action.data as TextHighlight).id);
 				}
 			}
 
@@ -294,6 +327,23 @@ export class PDFAnnotatorView extends ItemView {
 
 		this.storage.setPageStrokes(pageIndex, canvas.getStrokes());
 		this.storage.setPageTextHighlights(pageIndex, canvas.getTextHighlights());
+	}
+
+	/**
+	 * Apply updated settings to all active components.
+	 * Called when settings change while the view is open.
+	 */
+	applySettingsToOpenView(): void {
+		if (!this.pluginSettings) return;
+		this.applySettings();
+
+		// Update eraser radius and storage delay on all canvases
+		for (const canvas of this.annotationCanvases.values()) {
+			canvas.setEraserRadius(this.pluginSettings.eraserRadius);
+		}
+		if (this.storage) {
+			this.storage.setAutoSaveDelay(this.pluginSettings.autoSaveDelay);
+		}
 	}
 
 	private showToast(message: string): void {

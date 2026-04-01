@@ -155,6 +155,19 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		// Default highlighter width
+		new Setting(containerEl)
+			.setName('Default highlighter width')
+			.setDesc('Width in pixels (5-40)')
+			.addSlider(slider => slider
+				.setLimits(5, 40, 1)
+				.setValue(this.plugin.settings.defaultHighlighterWidth)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.defaultHighlighterWidth = value;
+					await this.plugin.saveSettings();
+				}));
+
 		// Auto-save
 		new Setting(containerEl)
 			.setName('Auto-save')
@@ -163,6 +176,19 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.autoSave)
 				.onChange(async (value) => {
 					this.plugin.settings.autoSave = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// Auto-save delay
+		new Setting(containerEl)
+			.setName('Auto-save delay')
+			.setDesc('Delay in milliseconds before auto-saving (500-10000)')
+			.addSlider(slider => slider
+				.setLimits(500, 10000, 500)
+				.setValue(this.plugin.settings.autoSaveDelay)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.autoSaveDelay = value;
 					await this.plugin.saveSettings();
 				}));
 	}

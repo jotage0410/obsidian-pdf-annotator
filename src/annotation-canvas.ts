@@ -2,6 +2,7 @@ import { DrawingEngine } from './drawing-engine';
 import { InputManager } from './input-manager';
 import type { Stroke, TextHighlight } from './types';
 import { DEFAULT_PEN_COLOR, DEFAULT_PEN_WIDTH, DEFAULT_ERASER_RADIUS } from './constants';
+import { generateId } from './utils';
 
 export class AnnotationCanvas {
 	private canvas: HTMLCanvasElement;
@@ -175,7 +176,7 @@ export class AnnotationCanvas {
 		const pressure = e.pressure || 0.5;
 
 		this.currentStroke = {
-			id: crypto.randomUUID(),
+			id: generateId(),
 			tool: this.activeTool as 'pen' | 'highlighter',
 			color: this.penColor,
 			maxWidth: this.penWidth,
@@ -270,20 +271,24 @@ export class AnnotationCanvas {
 	}
 
 	private handleEraserPoint(e: PointerEvent): void {
-		const { x, y } = this.getCanvasPoint(e);
+		// Process coalesced events for smooth eraser path
+		const events = e.getCoalescedEvents?.() ?? [e];
 		const removedStrokes: Stroke[] = [];
 
-		// Check all strokes, collect all that collide (don't break on first)
-		for (let i = this.strokes.length - 1; i >= 0; i--) {
-			const stroke = this.strokes[i];
-			for (const pt of stroke.points) {
-				const px = pt.x * this.pageWidth;
-				const py = pt.y * this.pageHeight;
-				const dist = Math.hypot(px - x, py - y);
-				if (dist < this.eraserRadius) {
-					const removed = this.strokes.splice(i, 1)[0];
-					removedStrokes.push(removed);
-					break; // Break inner loop (points), continue outer (strokes)
+		for (const ce of events) {
+			const { x, y } = this.getCanvasPoint(ce);
+
+			for (let i = this.strokes.length - 1; i >= 0; i--) {
+				const stroke = this.strokes[i];
+				for (const pt of stroke.points) {
+					const px = pt.x * this.pageWidth;
+					const py = pt.y * this.pageHeight;
+					const dist = Math.hypot(px - x, py - y);
+					if (dist < this.eraserRadius) {
+						const removed = this.strokes.splice(i, 1)[0];
+						removedStrokes.push(removed);
+						break;
+					}
 				}
 			}
 		}
@@ -294,7 +299,7 @@ export class AnnotationCanvas {
 					this.onStrokeRemoved(removed, this.pageIndex);
 				}
 			}
-			this.redraw(); // Single redraw for all removals
+			this.redraw();
 		}
 	}
 

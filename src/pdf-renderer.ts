@@ -9,10 +9,12 @@ export class PDFRenderer {
 	private pdfDoc: PDFDocumentProxy | null = null;
 	private pageWrappers: Map<number, HTMLElement> = new Map();
 	private renderedPages: Set<number> = new Set();
+	private renderingPages: Set<number> = new Set();
 	private visiblePages: Set<number> = new Set();
 	private pageViewports: Map<number, { width: number; height: number }> = new Map();
 	private observer: IntersectionObserver | null = null;
 	private scale = 1.5;
+	private renderGeneration: Map<number, number> = new Map();
 	private onPageReady: ((pageIndex: number, wrapper: HTMLElement, viewport: { width: number; height: number }) => void) | null = null;
 
 	constructor(containerEl: HTMLElement) {
@@ -150,80 +152,107 @@ export class PDFRenderer {
 				}
 			}
 			this.renderedPages.delete(pageToEvict);
+			// Bump generation to cancel any in-flight renders
+			this.renderGeneration.set(pageToEvict, (this.renderGeneration.get(pageToEvict) ?? 0) + 1);
 			evicted++;
 		}
 	}
 
 	private async renderPage(pageIndex: number): Promise<void> {
-		if (!this.pdfDoc || this.renderedPages.has(pageIndex)) return;
-		this.renderedPages.add(pageIndex);
+		if (!this.pdfDoc || this.renderedPages.has(pageIndex) || this.renderingPages.has(pageIndex)) return;
+		this.renderingPages.add(pageIndex);
 
-		const page = await this.pdfDoc.getPage(pageIndex + 1);
-		const viewport = page.getViewport({ scale: this.scale });
-		const dpr = window.devicePixelRatio || 1;
+		// Increment generation to detect stale renders
+		const generation = (this.renderGeneration.get(pageIndex) ?? 0) + 1;
+		this.renderGeneration.set(pageIndex, generation);
 
-		const wrapper = this.pageWrappers.get(pageIndex);
-		if (!wrapper) return;
-
-		wrapper.innerHTML = '';
-		wrapper.style.width = `${viewport.width}px`;
-		wrapper.style.height = `${viewport.height}px`;
-
-		// Create PDF canvas
-		const canvas = document.createElement('canvas');
-		canvas.className = 'pdf-canvas';
-		canvas.width = viewport.width * dpr;
-		canvas.height = viewport.height * dpr;
-		canvas.style.width = `${viewport.width}px`;
-		canvas.style.height = `${viewport.height}px`;
-
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
-		ctx.scale(dpr, dpr);
-
-		wrapper.appendChild(canvas);
-
-		// Create text layer
-		const textLayerDiv = document.createElement('div');
-		textLayerDiv.className = 'text-layer';
-		wrapper.appendChild(textLayerDiv);
-
-		// Render PDF page to canvas
-		await page.render({ canvasContext: ctx, viewport }).promise;
-
-		// Render text layer for text selection
 		try {
-			const textContent = await page.getTextContent();
-			// Use TextLayer API (pdfjs-dist v4+)
-			if ((pdfjsLib as any).TextLayer) {
-				const textLayer = new (pdfjsLib as any).TextLayer({
-					textContentSource: textContent,
-					container: textLayerDiv,
-					viewport,
+			const page = await this.pdfDoc.getPage(pageIndex + 1);
+
+			// Check if this render is still current (not evicted while loading)
+			if (this.renderGeneration.get(pageIndex) !== generation) return;
+
+			const viewport = page.getViewport({ scale: this.scale });
+			const dpr = window.devicePixelRatio || 1;
+
+			const wrapper = this.pageWrappers.get(pageIndex);
+			if (!wrapper) return;
+
+			wrapper.innerHTML = '';
+			wrapper.style.width = `${viewport.width}px`;
+			wrapper.style.height = `${viewport.height}px`;
+
+			// Create PDF canvas
+			const canvas = document.createElement('canvas');
+			canvas.className = 'pdf-canvas';
+			canvas.width = viewport.width * dpr;
+			canvas.height = viewport.height * dpr;
+			canvas.style.width = `${viewport.width}px`;
+			canvas.style.height = `${viewport.height}px`;
+
+			const ctx = canvas.getContext('2d');
+			if (!ctx) {
+				console.warn('Pencil: Failed to get 2D context for page', pageIndex + 1);
+				return;
+			}
+			ctx.scale(dpr, dpr);
+
+			wrapper.appendChild(canvas);
+
+			// Create text layer
+			const textLayerDiv = document.createElement('div');
+			textLayerDiv.className = 'text-layer';
+			wrapper.appendChild(textLayerDiv);
+
+			// Render PDF page to canvas
+			await page.render({ canvasContext: ctx, viewport }).promise;
+
+			// Check if still current after render
+			if (this.renderGeneration.get(pageIndex) !== generation) return;
+
+			// Render text layer for text selection
+			try {
+				const textContent = await page.getTextContent();
+				// Use TextLayer API (pdfjs-dist v4+)
+				if ((pdfjsLib as any).TextLayer) {
+					const textLayer = new (pdfjsLib as any).TextLayer({
+						textContentSource: textContent,
+						container: textLayerDiv,
+						viewport,
+					});
+					await textLayer.render();
+				} else if ((pdfjsLib as any).renderTextLayer) {
+					// Fallback for older versions
+					await (pdfjsLib as any).renderTextLayer({
+						textContent,
+						container: textLayerDiv,
+						viewport,
+					}).promise;
+				}
+			} catch (e) {
+				console.warn('Pencil: Failed to render text layer for page', pageIndex + 1, e);
+			}
+
+			// Final generation check before creating annotation layer
+			if (this.renderGeneration.get(pageIndex) !== generation) return;
+
+			// Create annotation layer
+			const annotationLayer = document.createElement('div');
+			annotationLayer.className = 'annotation-layer';
+			wrapper.appendChild(annotationLayer);
+
+			this.renderedPages.add(pageIndex);
+
+			if (this.onPageReady) {
+				this.onPageReady(pageIndex, wrapper, {
+					width: viewport.width,
+					height: viewport.height,
 				});
-				await textLayer.render();
-			} else if ((pdfjsLib as any).renderTextLayer) {
-				// Fallback for older versions
-				await (pdfjsLib as any).renderTextLayer({
-					textContent,
-					container: textLayerDiv,
-					viewport,
-				}).promise;
 			}
 		} catch (e) {
-			console.warn('Pencil: Failed to render text layer for page', pageIndex + 1, e);
-		}
-
-		// Create annotation layer
-		const annotationLayer = document.createElement('div');
-		annotationLayer.className = 'annotation-layer';
-		wrapper.appendChild(annotationLayer);
-
-		if (this.onPageReady) {
-			this.onPageReady(pageIndex, wrapper, {
-				width: viewport.width,
-				height: viewport.height,
-			});
+			console.error('Pencil: Failed to render page', pageIndex + 1, e);
+		} finally {
+			this.renderingPages.delete(pageIndex);
 		}
 	}
 
@@ -248,5 +277,7 @@ export class PDFRenderer {
 		this.renderedPages.clear();
 		this.visiblePages.clear();
 		this.pageViewports.clear();
+		this.renderingPages.clear();
+		this.renderGeneration.clear();
 	}
 }

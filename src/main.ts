@@ -85,6 +85,23 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.applySettingsToOpenViews();
+	}
+
+	async onExternalSettingsChange() {
+		await this.loadSettings();
+		this.applySettingsToOpenViews();
+	}
+
+	private applySettingsToOpenViews(): void {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view as PDFAnnotatorView;
+			if (view && view.setSettings) {
+				view.setSettings(this.settings);
+				view.applySettingsToOpenView();
+			}
+		}
 	}
 
 	async onunload() {
